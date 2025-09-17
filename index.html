@@ -1,0 +1,940 @@
+function App() {
+  const [csvData, setCsvData] = React.useState([]);
+  const [selectedCourses, setSelectedCourses] = React.useState([]);
+  const [cloValues, setCloValues] = React.useState({});
+  const [ploResults, setPloResults] = React.useState({});
+  const [historicalData, setHistoricalData] = React.useState({
+    year1: { K: '', S: '', V: '', year: '' },
+    year2: { K: '', S: '', V: '', year: '' }
+  });
+  const [showResults, setShowResults] = React.useState(false);
+
+  // PLO categories
+  const ploCategories = {
+    K: ['K1', 'K2'],
+    S: ['S1', 'S2', 'S3', 'S4', 'S5'],
+    V: ['V1', 'V2', 'V3', 'V4']
+  };
+
+  // Sample data structure (replace with actual CSV parsing)
+  const sampleData = [
+    { Course_Code: 'COMP100', K1: 'I', K2: '', S1: '', S2: '', S3: '', S4: 'I', S5: 'I', V1: 'I', V2: '', V3: '', V4: '' },
+    { Course_Code: 'MATH101', K1: 'I', K2: '', S1: '', S2: '', S3: '', S4: 'I', S5: '', V1: '', V2: 'I', V3: '', V4: '' },
+    { Course_Code: 'COMP111', K1: 'I', K2: '', S1: '', S2: 'I', S3: 'I', S4: 'I', S5: '', V1: '', V2: '', V3: 'I', V4: '' },
+    { Course_Code: 'COMP221', K1: '', K2: 'I', S1: 'I', S2: 'I', S3: '', S4: 'I', S5: '', V1: '', V2: '', V3: 'I', V4: '' },
+    { Course_Code: 'COMP321', K1: '', K2: 'P', S1: 'P', S2: 'P', S3: '', S4: '', S5: '', V1: 'P', V2: '', V3: '', V4: '' },
+    { Course_Code: 'COMP491', K1: '', K2: 'M', S1: 'M', S2: 'M', S3: 'M', S4: '', S5: '', V1: 'M', V2: '', V3: 'M', V4: '' }
+  ];
+
+  React.useEffect(() => {
+    setCsvData(sampleData);
+  }, []);
+
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target.result;
+        const rows = text.split('\n');
+        const headers = rows[0].split(',');
+        const data = rows.slice(1).map(row => {
+          const values = row.split(',');
+          const obj = {};
+          headers.forEach((header, index) => {
+            obj[header.trim()] = values[index]?.trim() || '';
+          });
+          return obj;
+        }).filter(row => row.Course_Code);
+        setCsvData(data);
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  const handleCourseSelection = (courseCode) => {
+    setSelectedCourses(prev => 
+      prev.includes(courseCode) 
+        ? prev.filter(c => c !== courseCode)
+        : [...prev, courseCode]
+    );
+  };
+
+  const handleCloValueChange = (courseCode, gender, value) => {
+    setCloValues(prev => ({
+      ...prev,
+      [courseCode]: {
+        ...prev[courseCode],
+        [gender]: parseFloat(value) || 0
+      }
+    }));
+  };
+
+  const calculatePLOs = () => {
+    const results = {};
+    const allPlos = [...ploCategories.K, ...ploCategories.S, ...ploCategories.V];
+    
+    allPlos.forEach(plo => {
+      results[plo] = { male: 0, female: 0, all: 0, count: 0 };
+    });
+
+    selectedCourses.forEach(courseCode => {
+      const course = csvData.find(c => c.Course_Code === courseCode);
+      const courseValues = cloValues[courseCode];
+      
+      if (course && courseValues) {
+        allPlos.forEach(plo => {
+          if (course[plo] && course[plo] !== '' && course[plo] !== 'nan') {
+            results[plo].male += courseValues.male || 0;
+            results[plo].female += courseValues.female || 0;
+            results[plo].all += courseValues.all || 0;
+            results[plo].count += 1;
+          }
+        });
+      }
+    });
+
+    // Calculate averages
+    allPlos.forEach(plo => {
+      if (results[plo].count > 0) {
+        results[plo].male = results[plo].male / results[plo].count;
+        results[plo].female = results[plo].female / results[plo].count;
+        results[plo].all = results[plo].all / results[plo].count;
+      }
+    });
+
+    setPloResults(results);
+    setShowResults(true);
+  };
+
+  const getAverageByCategory = (category) => {
+    const plos = ploCategories[category];
+    const totals = { male: 0, female: 0, all: 0 };
+    let count = 0;
+
+    plos.forEach(plo => {
+      if (ploResults[plo] && ploResults[plo].count > 0) {
+        totals.male += ploResults[plo].male;
+        totals.female += ploResults[plo].female;
+        totals.all += ploResults[plo].all;
+        count++;
+      }
+    });
+
+    return count > 0 ? {
+      male: totals.male / count,
+      female: totals.female / count,
+      all: totals.all / count
+    } : { male: 0, female: 0, all: 0 };
+  };
+
+  const downloadPLOData = () => {
+    const data = [];
+    
+    // Add header
+    data.push(['PLO', 'Category', 'Male (%)', 'Female (%)', 'All (%)', 'Course Count']);
+    
+    // Add individual PLO data
+    Object.entries(ploResults).forEach(([plo, values]) => {
+      if (values.count > 0) {
+        const category = ploCategories.K.includes(plo) ? 'Knowledge' : 
+                        ploCategories.S.includes(plo) ? 'Skills' : 'Values';
+        data.push([
+          plo,
+          category,
+          values.male.toFixed(2),
+          values.female.toFixed(2),
+          values.all.toFixed(2),
+          values.count
+        ]);
+      }
+    });
+    
+    // Add category averages
+    data.push(['', '', '', '', '', '']); // Empty row
+    data.push(['Category Averages', '', '', '', '', '']);
+    
+    Object.entries(ploCategories).forEach(([category, plos]) => {
+      const avg = getAverageByCategory(category);
+      const categoryName = category === 'K' ? 'Knowledge' : category === 'S' ? 'Skills' : 'Values';
+      data.push([
+        `${categoryName} Average`,
+        categoryName,
+        avg.male.toFixed(2),
+        avg.female.toFixed(2),
+        avg.all.toFixed(2),
+        plos.filter(plo => ploResults[plo] && ploResults[plo].count > 0).length
+      ]);
+    });
+    
+    // Convert to CSV
+    const csvContent = data.map(row => row.join(',')).join('\n');
+    
+    // Create and download file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `PLO_Results_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const BarChart = ({ data, title }) => {
+    const maxValue = Math.max(...Object.values(data).map(d => Math.max(d.male, d.female, d.all)), 70);
+    
+    return (
+      <div className="bg-white p-4 rounded-lg shadow mb-6">
+        <h3 className="text-lg font-semibold mb-4">{title}</h3>
+        <div className="space-y-4">
+          {Object.entries(data).map(([plo, values]) => (
+            <div key={plo} className="space-y-2">
+              <div className="font-medium">{plo}</div>
+              <div className="flex items-center space-x-2">
+                <div className="w-12 text-sm">Male:</div>
+                <div className="flex-1 bg-gray-200 rounded-full h-6 relative">
+                  <div 
+                    className="bg-blue-500 h-6 rounded-full flex items-center justify-end pr-2"
+                    style={{ width: `${(values.male / maxValue) * 100}%` }}
+                  >
+                    <span className="text-white text-xs">{values.male.toFixed(1)}%</span>
+                  </div>
+                  <div className="absolute top-0 left-0 w-full h-6 flex items-center">
+                    <div 
+                      className="border-l-2 border-red-500 h-6"
+                      style={{ marginLeft: `${(70 / maxValue) * 100}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <div className="w-12 text-sm">Female:</div>
+                <div className="flex-1 bg-gray-200 rounded-full h-6 relative">
+                  <div 
+                    className="bg-pink-500 h-6 rounded-full flex items-center justify-end pr-2"
+                    style={{ width: `${(values.female / maxValue) * 100}%` }}
+                  >
+                    <span className="text-white text-xs">{values.female.toFixed(1)}%</span>
+                  </div>
+                  <div className="absolute top-0 left-0 w-full h-6 flex items-center">
+                    <div 
+                      className="border-l-2 border-red-500 h-6"
+                      style={{ marginLeft: `${(70 / maxValue) * 100}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <div className="w-12 text-sm">All:</div>
+                <div className="flex-1 bg-gray-200 rounded-full h-6 relative">
+                  <div 
+                    className="bg-green-500 h-6 rounded-full flex items-center justify-end pr-2"
+                    style={{ width: `${(values.all / maxValue) * 100}%` }}
+                  >
+                    <span className="text-white text-xs">{values.all.toFixed(1)}%</span>
+                  </div>
+                  <div className="absolute top-0 left-0 w-full h-6 flex items-center">
+                    <div 
+                      className="border-l-2 border-red-500 h-6"
+                      style={{ marginLeft: `${(70 / maxValue) * 100}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 text-sm text-gray-600">
+          <span className="inline-block w-4 h-0.5 bg-red-500 mr-2"></span>
+          Target Level: 70%
+        </div>
+      </div>
+    );
+  };
+
+  const VerticalBarChart = ({ data, title }) => {
+    const plos = Object.keys(data);
+    const maxValue = Math.max(...Object.values(data).map(d => Math.max(d.male, d.female, d.all)), 70, 100);
+    const chartHeight = 300;
+    const chartWidth = Math.max(plos.length * 80, 400);
+    const barWidth = 20;
+    const groupWidth = 70;
+    
+    return (
+      <div className="bg-white p-4 rounded-lg shadow mb-6">
+        <h3 className="text-lg font-semibold mb-4">{title}</h3>
+        <div className="overflow-x-auto">
+          <svg width={chartWidth} height={chartHeight + 60} className="mx-auto">
+            {/* Y-axis grid lines and labels */}
+            {[0, 20, 40, 60, 80, 100].map(value => {
+              const y = chartHeight - (value / maxValue) * chartHeight + 20;
+              return (
+                <g key={value}>
+                  <line
+                    x1={40}
+                    y1={y}
+                    x2={chartWidth - 20}
+                    y2={y}
+                    stroke="#e5e7eb"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={35}
+                    y={y + 4}
+                    textAnchor="end"
+                    className="text-xs fill-gray-600"
+                  >
+                    {value}%
+                  </text>
+                </g>
+              );
+            })}
+            
+            {/* Target line at 70% */}
+            <line
+              x1={40}
+              y1={chartHeight - (70 / maxValue) * chartHeight + 20}
+              x2={chartWidth - 20}
+              y2={chartHeight - (70 / maxValue) * chartHeight + 20}
+              stroke="#ef4444"
+              strokeWidth="2"
+              strokeDasharray="5,5"
+            />
+            
+            {/* Bars */}
+            {plos.map((plo, index) => {
+              const x = 50 + index * groupWidth;
+              const values = data[plo];
+              
+              return (
+                <g key={plo}>
+                  {/* Male bar */}
+                  <rect
+                    x={x}
+                    y={chartHeight - (values.male / maxValue) * chartHeight + 20}
+                    width={barWidth}
+                    height={(values.male / maxValue) * chartHeight}
+                    fill="#3b82f6"
+                  />
+                  <text
+                    x={x + barWidth/2}
+                    y={chartHeight - (values.male / maxValue) * chartHeight + 15}
+                    textAnchor="middle"
+                    className="text-xs fill-white font-medium"
+                  >
+                    {values.male.toFixed(0)}
+                  </text>
+                  
+                  {/* Female bar */}
+                  <rect
+                    x={x + barWidth + 2}
+                    y={chartHeight - (values.female / maxValue) * chartHeight + 20}
+                    width={barWidth}
+                    height={(values.female / maxValue) * chartHeight}
+                    fill="#ec4899"
+                  />
+                  <text
+                    x={x + barWidth + 2 + barWidth/2}
+                    y={chartHeight - (values.female / maxValue) * chartHeight + 15}
+                    textAnchor="middle"
+                    className="text-xs fill-white font-medium"
+                  >
+                    {values.female.toFixed(0)}
+                  </text>
+                  
+                  {/* All bar */}
+                  <rect
+                    x={x + (barWidth + 2) * 2}
+                    y={chartHeight - (values.all / maxValue) * chartHeight + 20}
+                    width={barWidth}
+                    height={(values.all / maxValue) * chartHeight}
+                    fill="#10b981"
+                  />
+                  <text
+                    x={x + (barWidth + 2) * 2 + barWidth/2}
+                    y={chartHeight - (values.all / maxValue) * chartHeight + 15}
+                    textAnchor="middle"
+                    className="text-xs fill-white font-medium"
+                  >
+                    {values.all.toFixed(0)}
+                  </text>
+                  
+                  {/* PLO label */}
+                  <text
+                    x={x + groupWidth/2}
+                    y={chartHeight + 40}
+                    textAnchor="middle"
+                    className="text-sm font-medium"
+                  >
+                    {plo}
+                  </text>
+                </g>
+              );
+            })}
+            
+            {/* Y-axis label */}
+            <text
+              x={15}
+              y={chartHeight/2}
+              textAnchor="middle"
+              className="text-sm font-medium"
+              transform={`rotate(-90, 15, ${chartHeight/2})`}
+            >
+              Percentage (%)
+            </text>
+          </svg>
+        </div>
+        
+        <div className="flex justify-center space-x-4 mt-4 text-sm">
+          <div className="flex items-center">
+            <div className="w-4 h-4 bg-blue-500 mr-2"></div>
+            Male
+          </div>
+          <div className="flex items-center">
+            <div className="w-4 h-4 bg-pink-500 mr-2"></div>
+            Female
+          </div>
+          <div className="flex items-center">
+            <div className="w-4 h-4 bg-green-500 mr-2"></div>
+            All
+          </div>
+          <div className="flex items-center">
+            <div className="w-4 h-0.5 bg-red-500 mr-2"></div>
+            Target (70%)
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const RadarChart = ({ data, title }) => {
+    const plos = Object.keys(data);
+    const center = 150;
+    const radius = 100;
+    const angleStep = (2 * Math.PI) / plos.length;
+
+    const getPoint = (value, index) => {
+      const angle = index * angleStep - Math.PI / 2;
+      const r = (value / 100) * radius;
+      return {
+        x: center + r * Math.cos(angle),
+        y: center + r * Math.sin(angle)
+      };
+    };
+
+    const getGridPoint = (value, index) => {
+      const angle = index * angleStep - Math.PI / 2;
+      const r = (value / 100) * radius;
+      return {
+        x: center + r * Math.cos(angle),
+        y: center + r * Math.sin(angle)
+      };
+    };
+
+    return (
+      <div className="bg-white p-4 rounded-lg shadow mb-6">
+        <h3 className="text-lg font-semibold mb-4">{title}</h3>
+        <svg width="300" height="300" className="mx-auto">
+          {/* Grid circles */}
+          {[20, 40, 60, 80, 100].map(value => (
+            <circle
+              key={value}
+              cx={center}
+              cy={center}
+              r={(value / 100) * radius}
+              fill="none"
+              stroke="#e5e7eb"
+              strokeWidth="1"
+            />
+          ))}
+          
+          {/* Grid lines */}
+          {plos.map((_, index) => {
+            const point = getGridPoint(100, index);
+            return (
+              <line
+                key={index}
+                x1={center}
+                y1={center}
+                x2={point.x}
+                y2={point.y}
+                stroke="#e5e7eb"
+                strokeWidth="1"
+              />
+            );
+          })}
+
+          {/* Target line (70%) */}
+          <circle
+            cx={center}
+            cy={center}
+            r={(70 / 100) * radius}
+            fill="none"
+            stroke="#ef4444"
+            strokeWidth="2"
+            strokeDasharray="5,5"
+          />
+
+          {/* Data polygons */}
+          {['male', 'female', 'all'].map((gender, gIndex) => {
+            const points = plos.map((plo, index) => {
+              const point = getPoint(data[plo][gender], index);
+              return `${point.x},${point.y}`;
+            }).join(' ');
+
+            const colors = ['#3b82f6', '#ec4899', '#10b981'];
+            
+            return (
+              <polygon
+                key={gender}
+                points={points}
+                fill={colors[gIndex]}
+                fillOpacity="0.2"
+                stroke={colors[gIndex]}
+                strokeWidth="2"
+              />
+            );
+          })}
+
+          {/* Labels */}
+          {plos.map((plo, index) => {
+            const labelPoint = getGridPoint(110, index);
+            return (
+              <text
+                key={plo}
+                x={labelPoint.x}
+                y={labelPoint.y}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                className="text-sm font-medium"
+              >
+                {plo}
+              </text>
+            );
+          })}
+        </svg>
+        <div className="flex justify-center space-x-4 mt-4 text-sm">
+          <div className="flex items-center">
+            <div className="w-4 h-4 bg-blue-500 mr-2"></div>
+            Male
+          </div>
+          <div className="flex items-center">
+            <div className="w-4 h-4 bg-pink-500 mr-2"></div>
+            Female
+          </div>
+          <div className="flex items-center">
+            <div className="w-4 h-4 bg-green-500 mr-2"></div>
+            All
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-100 p-6">
+      <div className="max-w-6xl mx-auto">
+        <h1 className="text-3xl font-bold text-center mb-8 text-gray-800">
+          Program Learning Outcomes (PLO) Calculator
+        </h1>
+
+        {/* File Upload Section */}
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <h2 className="text-xl font-semibold mb-4">1. Upload PLO-CLO Matrix</h2>
+          <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+            <input
+              type="file"
+              accept=".csv"
+              onChange={handleFileUpload}
+              className="hidden"
+              id="csvUpload"
+            />
+            <label htmlFor="csvUpload" className="cursor-pointer">
+              <div className="text-gray-600">
+                <i className="fas fa-upload text-2xl mb-2"></i>
+                <p>Click to upload your PLO-CLO Matrix CSV file</p>
+                <p className="text-sm text-gray-500">or drag and drop</p>
+              </div>
+            </label>
+          </div>
+          {csvData.length > 0 && (
+            <p className="text-green-600 mt-2">
+              ✓ Matrix loaded with {csvData.length} courses
+            </p>
+          )}
+        </div>
+
+        {/* Course Selection */}
+        {csvData.length > 0 && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 className="text-xl font-semibold mb-4">2. Select Courses for Calculation</h2>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {csvData.map(course => (
+                <label key={course.Course_Code} className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedCourses.includes(course.Course_Code)}
+                    onChange={() => handleCourseSelection(course.Course_Code)}
+                    className="rounded"
+                  />
+                  <span className="text-sm">{course.Course_Code}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* CLO Values Input */}
+        {selectedCourses.length > 0 && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 className="text-xl font-semibold mb-4">3. Enter CLO Values (%)</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse border border-gray-300">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="border border-gray-300 p-2">Course</th>
+                    <th className="border border-gray-300 p-2">Male (%)</th>
+                    <th className="border border-gray-300 p-2">Female (%)</th>
+                    <th className="border border-gray-300 p-2">All (%)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedCourses.map(courseCode => (
+                    <tr key={courseCode}>
+                      <td className="border border-gray-300 p-2 font-medium">{courseCode}</td>
+                      <td className="border border-gray-300 p-2">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          className="w-full p-1 border rounded"
+                          onChange={(e) => handleCloValueChange(courseCode, 'male', e.target.value)}
+                        />
+                      </td>
+                      <td className="border border-gray-300 p-2">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          className="w-full p-1 border rounded"
+                          onChange={(e) => handleCloValueChange(courseCode, 'female', e.target.value)}
+                        />
+                      </td>
+                      <td className="border border-gray-300 p-2">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          className="w-full p-1 border rounded"
+                          onChange={(e) => handleCloValueChange(courseCode, 'all', e.target.value)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <button
+              onClick={calculatePLOs}
+              className="mt-4 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Calculate PLOs
+            </button>
+          </div>
+        )}
+
+        {/* Results Section */}
+        {showResults && Object.keys(ploResults).length > 0 && (
+          <div className="space-y-6">
+            {/* Download Button */}
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-semibold">PLO Results</h3>
+                <button
+                  onClick={downloadPLOData}
+                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2"
+                >
+                  <i className="fas fa-download"></i>
+                  <span>Download PLO Data</span>
+                </button>
+              </div>
+              <p className="text-gray-600 mt-2">Download all PLO results and category averages as CSV file</p>
+            </div>
+            {/* Overall PLO Chart */}
+            {(() => {
+              const allPloData = {};
+              Object.keys(ploResults).forEach(plo => {
+                if (ploResults[plo] && ploResults[plo].count > 0) {
+                  allPloData[plo] = ploResults[plo];
+                }
+              });
+              
+              if (Object.keys(allPloData).length === 0) return null;
+
+              return (
+                <div>
+                  <VerticalBarChart 
+                    data={allPloData} 
+                    title="All Program Learning Outcomes (PLOs) - Vertical Bar Chart" 
+                  />
+                  <BarChart 
+                    data={allPloData} 
+                    title="All Program Learning Outcomes (PLOs) - Horizontal Bar Chart" 
+                  />
+                  <RadarChart 
+                    data={allPloData} 
+                    title="All Program Learning Outcomes (PLOs) - Radar Chart" 
+                  />
+                </div>
+              );
+            })()}
+
+            {/* Individual PLO Charts */}
+            {Object.entries(ploCategories).map(([category, plos]) => {
+              const categoryData = {};
+              plos.forEach(plo => {
+                if (ploResults[plo] && ploResults[plo].count > 0) {
+                  categoryData[plo] = ploResults[plo];
+                }
+              });
+              
+              if (Object.keys(categoryData).length === 0) return null;
+
+              return (
+                <div key={category}>
+                  <VerticalBarChart 
+                    data={categoryData} 
+                    title={`${category === 'K' ? 'Knowledge' : category === 'S' ? 'Skills' : 'Values'} PLOs - Vertical Bar Chart`} 
+                  />
+                  <BarChart 
+                    data={categoryData} 
+                    title={`${category === 'K' ? 'Knowledge' : category === 'S' ? 'Skills' : 'Values'} PLOs - Horizontal Bar Chart`} 
+                  />
+                  <RadarChart 
+                    data={categoryData} 
+                    title={`${category === 'K' ? 'Knowledge' : category === 'S' ? 'Skills' : 'Values'} PLOs - Radar Chart`} 
+                  />
+                </div>
+              );
+            })}
+
+            {/* Category Averages */}
+            <div className="bg-white rounded-lg shadow p-6">
+              <h3 className="text-xl font-semibold mb-4">PLO Category Averages</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {Object.entries(ploCategories).map(([category, plos]) => {
+                  const avg = getAverageByCategory(category);
+                  const categoryName = category === 'K' ? 'Knowledge' : category === 'S' ? 'Skills' : 'Values';
+                  
+                  return (
+                    <div key={category} className="text-center">
+                      <h4 className="font-semibold text-lg mb-2">{categoryName} PLOs</h4>
+                      <div className="space-y-2">
+                        <div className="flex justify-between">
+                          <span>Male:</span>
+                          <span className={`font-medium ${avg.male >= 70 ? 'text-green-600' : 'text-red-600'}`}>
+                            {avg.male.toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Female:</span>
+                          <span className={`font-medium ${avg.female >= 70 ? 'text-green-600' : 'text-red-600'}`}>
+                            {avg.female.toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>All:</span>
+                          <span className={`font-medium ${avg.all >= 70 ? 'text-green-600' : 'text-red-600'}`}>
+                            {avg.all.toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Historical Comparison */}
+            <div className="bg-white rounded-lg shadow p-6">
+              <h3 className="text-xl font-semibold mb-4">Historical Comparison</h3>
+              
+              {/* Year Input Section */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Previous Year 1</label>
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      placeholder="Enter Year (e.g., 2022)"
+                      className="w-full p-2 border rounded"
+                      onChange={(e) => setHistoricalData(prev => ({
+                        ...prev,
+                        year1: { ...prev.year1, year: e.target.value }
+                      }))}
+                    />
+                    <div className="grid grid-cols-3 gap-2">
+                      <input
+                        type="number"
+                        placeholder="K (%)"
+                        className="w-full p-2 border rounded text-sm"
+                        onChange={(e) => setHistoricalData(prev => ({
+                          ...prev,
+                          year1: { ...prev.year1, K: e.target.value }
+                        }))}
+                      />
+                      <input
+                        type="number"
+                        placeholder="S (%)"
+                        className="w-full p-2 border rounded text-sm"
+                        onChange={(e) => setHistoricalData(prev => ({
+                          ...prev,
+                          year1: { ...prev.year1, S: e.target.value }
+                        }))}
+                      />
+                      <input
+                        type="number"
+                        placeholder="V (%)"
+                        className="w-full p-2 border rounded text-sm"
+                        onChange={(e) => setHistoricalData(prev => ({
+                          ...prev,
+                          year1: { ...prev.year1, V: e.target.value }
+                        }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium mb-2">Previous Year 2</label>
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      placeholder="Enter Year (e.g., 2023)"
+                      className="w-full p-2 border rounded"
+                      onChange={(e) => setHistoricalData(prev => ({
+                        ...prev,
+                        year2: { ...prev.year2, year: e.target.value }
+                      }))}
+                    />
+                    <div className="grid grid-cols-3 gap-2">
+                      <input
+                        type="number"
+                        placeholder="K (%)"
+                        className="w-full p-2 border rounded text-sm"
+                        onChange={(e) => setHistoricalData(prev => ({
+                          ...prev,
+                          year2: { ...prev.year2, K: e.target.value }
+                        }))}
+                      />
+                      <input
+                        type="number"
+                        placeholder="S (%)"
+                        className="w-full p-2 border rounded text-sm"
+                        onChange={(e) => setHistoricalData(prev => ({
+                          ...prev,
+                          year2: { ...prev.year2, S: e.target.value }
+                        }))}
+                      />
+                      <input
+                        type="number"
+                        placeholder="V (%)"
+                        className="w-full p-2 border rounded text-sm"
+                        onChange={(e) => setHistoricalData(prev => ({
+                          ...prev,
+                          year2: { ...prev.year2, V: e.target.value }
+                        }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Historical Chart */}
+              <div className="mt-6">
+                <h4 className="font-semibold mb-4">Historical Trend Comparison</h4>
+                <div className="space-y-4">
+                  {['K', 'S', 'V'].map(category => {
+                    const currentAvg = getAverageByCategory(category);
+                    const year1Val = parseFloat(historicalData.year1[category]) || 0;
+                    const year2Val = parseFloat(historicalData.year2[category]) || 0;
+                    const categoryName = category === 'K' ? 'Knowledge' : category === 'S' ? 'Skills' : 'Values';
+                    const year1Label = historicalData.year1.year || 'Year 1';
+                    const year2Label = historicalData.year2.year || 'Year 2';
+                    const currentYear = new Date().getFullYear();
+                    
+                    return (
+                      <div key={category} className="space-y-2">
+                        <div className="font-medium">{categoryName} PLOs</div>
+                        <div className="flex items-center space-x-4">
+                          <div className="w-20 text-sm">{year1Label}:</div>
+                          <div className="flex-1 bg-gray-200 rounded-full h-6 relative">
+                            <div 
+                              className="bg-blue-400 h-6 rounded-full flex items-center justify-end pr-2"
+                              style={{ width: `${Math.min((year1Val / 100) * 100, 100)}%` }}
+                            >
+                              <span className="text-white text-xs">{year1Val.toFixed(1)}%</span>
+                            </div>
+                            <div className="absolute top-0 left-0 w-full h-6 flex items-center">
+                              <div 
+                                className="border-l-2 border-red-500 h-6"
+                                style={{ marginLeft: '70%' }}
+                              ></div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-4">
+                          <div className="w-20 text-sm">{year2Label}:</div>
+                          <div className="flex-1 bg-gray-200 rounded-full h-6 relative">
+                            <div 
+                              className="bg-blue-500 h-6 rounded-full flex items-center justify-end pr-2"
+                              style={{ width: `${Math.min((year2Val / 100) * 100, 100)}%` }}
+                            >
+                              <span className="text-white text-xs">{year2Val.toFixed(1)}%</span>
+                            </div>
+                            <div className="absolute top-0 left-0 w-full h-6 flex items-center">
+                              <div 
+                                className="border-l-2 border-red-500 h-6"
+                                style={{ marginLeft: '70%' }}
+                              ></div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-4">
+                          <div className="w-20 text-sm">{currentYear}:</div>
+                          <div className="flex-1 bg-gray-200 rounded-full h-6 relative">
+                            <div 
+                              className="bg-blue-600 h-6 rounded-full flex items-center justify-end pr-2"
+                              style={{ width: `${Math.min((currentAvg.all / 100) * 100, 100)}%` }}
+                            >
+                              <span className="text-white text-xs">{currentAvg.all.toFixed(1)}%</span>
+                            </div>
+                            <div className="absolute top-0 left-0 w-full h-6 flex items-center">
+                              <div 
+                                className="border-l-2 border-red-500 h-6"
+                                style={{ marginLeft: '70%' }}
+                              ></div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-4 text-sm text-gray-600">
+                  <span className="inline-block w-4 h-0.5 bg-red-500 mr-2"></span>
+                  Target Level: 70%
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
