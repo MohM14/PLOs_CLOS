@@ -44,6 +44,7 @@ function App() {
   const [showAbout, setShowAbout] = React.useState(false);
   const [targetValue, setTargetValue] = React.useState(70);
   const [showCategoryDetails, setShowCategoryDetails] = React.useState(false);
+  const [importedCloData, setImportedCloData] = React.useState(null);
 
   // PLO categories - dynamically extracted from CSV
   const getPloCategories = () => {
@@ -100,6 +101,69 @@ function App() {
     }
   };
 
+  const handleCloDataImport = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target.result;
+        const rows = text.split('\n').filter(row => row.trim());
+        
+        // Find the header row (should contain Course, CLO, Mapping, Male (%), Female (%), All (%))
+        let headerRowIndex = -1;
+        let headers = [];
+        
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i].split(/[,\t]/);
+          if (row.some(cell => cell.toLowerCase().includes('course')) && 
+              row.some(cell => cell.toLowerCase().includes('clo')) &&
+              row.some(cell => cell.toLowerCase().includes('male')) &&
+              row.some(cell => cell.toLowerCase().includes('female'))) {
+            headerRowIndex = i;
+            headers = row.map(h => h.trim());
+            break;
+          }
+        }
+        
+        if (headerRowIndex === -1) {
+          alert('Invalid file format. Please ensure the file contains headers: Course, CLO, Mapping, Male (%), Female (%), All (%)');
+          return;
+        }
+        
+        // Parse data rows
+        const importedData = {};
+        for (let i = headerRowIndex + 1; i < rows.length; i++) {
+          const values = rows[i].split(/[,\t]/);
+          if (values.length >= 6) {
+            const courseCode = values[0]?.trim();
+            const clo = values[1]?.trim();
+            const mapping = values[2]?.trim();
+            const maleValue = parseFloat(values[3]?.trim()) || 0;
+            const femaleValue = parseFloat(values[4]?.trim()) || 0;
+            const allValue = parseFloat(values[5]?.trim()) || 0;
+            
+            if (courseCode && clo) {
+              if (!importedData[courseCode]) {
+                importedData[courseCode] = {};
+              }
+              importedData[courseCode][clo] = {
+                male: maleValue,
+                female: femaleValue,
+                all: allValue,
+                mapping: mapping
+              };
+            }
+          }
+        }
+        
+        setImportedCloData(importedData);
+        setCloValues(importedData);
+        alert(`Successfully imported CLO data for ${Object.keys(importedData).length} courses`);
+      };
+      reader.readAsText(file);
+    }
+  };
+
   const handleCourseSelection = (courseCode) => {
     setSelectedCourses(prev => 
       prev.includes(courseCode) 
@@ -146,7 +210,10 @@ function App() {
     const allPlos = [...ploCategories.K, ...ploCategories.S, ...ploCategories.V];
     
     allPlos.forEach(plo => {
-      results[plo] = { male: 0, female: 0, all: 0, count: 0 };
+      results[plo] = { 
+        male: 0, female: 0, all: 0, 
+        maleCount: 0, femaleCount: 0, allCount: 0 
+      };
     });
 
     selectedCourses.forEach(courseCode => {
@@ -158,23 +225,33 @@ function App() {
           if (course[plo] && course[plo] !== '' && course[plo] !== 'nan' && ['I', 'P', 'M'].includes(course[plo].toUpperCase())) {
             const cloData = courseValues[plo];
             if (cloData) {
-              results[plo].male += cloData.male || 0;
-              results[plo].female += cloData.female || 0;
-              results[plo].all += cloData.all || 0;
-              results[plo].count += 1;
+              // Only include non-zero values in calculations
+              if (cloData.male && cloData.male > 0) {
+                results[plo].male += cloData.male;
+                results[plo].maleCount += 1;
+              }
+              if (cloData.female && cloData.female > 0) {
+                results[plo].female += cloData.female;
+                results[plo].femaleCount += 1;
+              }
+              if (cloData.all && cloData.all > 0) {
+                results[plo].all += cloData.all;
+                results[plo].allCount += 1;
+              }
             }
           }
         });
       }
     });
 
-    // Calculate averages
+    // Calculate averages (excluding zero values)
     allPlos.forEach(plo => {
-      if (results[plo].count > 0) {
-        results[plo].male = results[plo].male / results[plo].count;
-        results[plo].female = results[plo].female / results[plo].count;
-        results[plo].all = results[plo].all / results[plo].count;
-      }
+      results[plo].male = results[plo].maleCount > 0 ? results[plo].male / results[plo].maleCount : 0;
+      results[plo].female = results[plo].femaleCount > 0 ? results[plo].female / results[plo].femaleCount : 0;
+      results[plo].all = results[plo].allCount > 0 ? results[plo].all / results[plo].allCount : 0;
+      
+      // Keep the maximum count for display purposes
+      results[plo].count = Math.max(results[plo].maleCount, results[plo].femaleCount, results[plo].allCount);
     });
 
     setPloResults(results);
@@ -184,22 +261,31 @@ function App() {
   const getAverageByCategory = (category) => {
     const plos = ploCategories[category];
     const totals = { male: 0, female: 0, all: 0 };
-    let count = 0;
+    const counts = { male: 0, female: 0, all: 0 };
 
     plos.forEach(plo => {
       if (ploResults[plo] && ploResults[plo].count > 0) {
-        totals.male += ploResults[plo].male;
-        totals.female += ploResults[plo].female;
-        totals.all += ploResults[plo].all;
-        count++;
+        // Only include non-zero values in category averages
+        if (ploResults[plo].male > 0) {
+          totals.male += ploResults[plo].male;
+          counts.male++;
+        }
+        if (ploResults[plo].female > 0) {
+          totals.female += ploResults[plo].female;
+          counts.female++;
+        }
+        if (ploResults[plo].all > 0) {
+          totals.all += ploResults[plo].all;
+          counts.all++;
+        }
       }
     });
 
-    return count > 0 ? {
-      male: totals.male / count,
-      female: totals.female / count,
-      all: totals.all / count
-    } : { male: 0, female: 0, all: 0 };
+    return {
+      male: counts.male > 0 ? totals.male / counts.male : 0,
+      female: counts.female > 0 ? totals.female / counts.female : 0,
+      all: counts.all > 0 ? totals.all / counts.all : 0
+    };
   };
 
   const downloadChart = (chartId, filename) => {
@@ -916,7 +1002,7 @@ function App() {
         let iContribution = 0, mContribution = 0, pContribution = 0;
         let iCount = 0, mCount = 0, pCount = 0;
         
-        // Calculate contributions from each mastery level
+        // Calculate contributions from each mastery level (excluding zero values)
         selectedCourses.forEach(courseCode => {
           const course = csvData.find(c => c.Course_Code === courseCode);
           const courseValues = cloValues[courseCode];
@@ -925,15 +1011,18 @@ function App() {
             const level = course[plo].toUpperCase();
             const value = courseValues[plo].all || 0;
             
-            if (level === 'I') {
-              iContribution += value;
-              iCount++;
-            } else if (level === 'M') {
-              mContribution += value;
-              mCount++;
-            } else if (level === 'P') {
-              pContribution += value;
-              pCount++;
+            // Only include non-zero values
+            if (value > 0) {
+              if (level === 'I') {
+                iContribution += value;
+                iCount++;
+              } else if (level === 'M') {
+                mContribution += value;
+                mCount++;
+              } else if (level === 'P') {
+                pContribution += value;
+                pCount++;
+              }
             }
           }
         });
@@ -1248,12 +1337,76 @@ function App() {
           </div>
         )}
 
+        {/* CLO Data Import Option */}
+        {selectedCourses.length > 0 && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 className="text-xl font-semibold mb-4">3. Import CLO Data (Optional)</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              You can import CLO data from an Excel/CSV file or enter values manually below.
+            </p>
+            
+            <div className="border-2 border-dashed border-blue-300 rounded-lg p-6 text-center bg-blue-50">
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls,.txt"
+                onChange={handleCloDataImport}
+                className="hidden"
+                id="cloDataUpload"
+              />
+              <label htmlFor="cloDataUpload" className="cursor-pointer">
+                <div className="text-blue-600">
+                  <i className="fas fa-file-excel text-2xl mb-2"></i>
+                  <p className="font-medium">Click to upload CLO data file</p>
+                  <p className="text-sm text-blue-500">
+                    Expected format: Course | CLO | Mapping | Male (%) | Female (%) | All (%)
+                  </p>
+                </div>
+              </label>
+            </div>
+            
+            {importedCloData && (
+              <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex justify-between items-center">
+                  <p className="text-green-800 text-sm">
+                    <i className="fas fa-check-circle mr-2"></i>
+                    <strong>Success:</strong> CLO data imported for {Object.keys(importedCloData).length} courses. 
+                    You can still modify values manually below if needed.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setImportedCloData(null);
+                      setCloValues({});
+                    }}
+                    className="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600 transition-colors"
+                  >
+                    Clear Imported Data
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+              <h4 className="font-medium text-gray-800 mb-2">Expected File Format:</h4>
+              <div className="text-sm text-gray-600">
+                <p className="mb-2">Your file should contain the following columns (separated by commas or tabs):</p>
+                <div className="bg-white p-2 rounded border font-mono text-xs">
+                  Course | CLO | Mapping | Male (%) | Female (%) | All (%)<br/>
+                  COMP100 | K1 | I | 85.5 | 90.2 | 87.8<br/>
+                  COMP100 | S1 | P | 78.0 | 82.5 | 80.2<br/>
+                  ...
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* CLO Values Input */}
         {selectedCourses.length > 0 && (
           <div className="bg-white rounded-lg shadow p-6 mb-6">
-            <h2 className="text-xl font-semibold mb-4">3. Enter CLO Values (%)</h2>
+            <h2 className="text-xl font-semibold mb-4">4. Enter/Edit CLO Values (%)</h2>
             <p className="text-sm text-gray-600 mb-4">
-              Enter values only for CLOs that are mapped to PLOs (marked with I, P, or M in the matrix)
+              Enter values only for CLOs that are mapped to PLOs (marked with I, P, or M in the matrix). 
+              {importedCloData ? 'Values from imported file are pre-filled - you can modify them as needed.' : ''}
             </p>
             
             {selectedCourses.map(courseCode => {
@@ -1303,6 +1456,7 @@ function App() {
                                 min="0"
                                 max="100"
                                 step="0.1"
+                                value={cloValues[courseCode]?.[clo]?.male || ''}
                                 className="w-full p-1 border rounded"
                                 onChange={(e) => handleCloValueChange(courseCode, clo, 'male', e.target.value)}
                               />
@@ -1313,6 +1467,7 @@ function App() {
                                 min="0"
                                 max="100"
                                 step="0.1"
+                                value={cloValues[courseCode]?.[clo]?.female || ''}
                                 className="w-full p-1 border rounded"
                                 onChange={(e) => handleCloValueChange(courseCode, clo, 'female', e.target.value)}
                               />
@@ -1323,6 +1478,7 @@ function App() {
                                 min="0"
                                 max="100"
                                 step="0.1"
+                                value={cloValues[courseCode]?.[clo]?.all || ''}
                                 className="w-full p-1 border rounded"
                                 onChange={(e) => handleCloValueChange(courseCode, clo, 'all', e.target.value)}
                               />
@@ -1775,7 +1931,6 @@ function App() {
     </div>
   );
 }
-
 
 
         
